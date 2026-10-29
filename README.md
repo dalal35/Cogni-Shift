@@ -1,89 +1,85 @@
-# CogniShift
+<h1 align="center">CogniShift</h1>
 
-**Can a provider’s first five orders predict elevated modification activity in their next ten?**
+<p align="center"><strong>Can the first five orders help predict how often the next ten will be changed?</strong></p>
 
-**2026 Purdue Innovation Challenge — Best Overall Integration** · Built by Catalyst Crew
+<p align="center">
+  <strong>Best Overall Integration</strong> · 2026 Purdue Innovation Challenge · Catalyst Crew
+</p>
 
-| Logistic regression ROC-AUC | Analyzed orders | Eligible shifts¹ | Providers | Evaluation |
+<p align="center">
+  <img alt="Python 3.14" src="https://img.shields.io/badge/Python-3.14-3776AB?style=flat-square&amp;logo=python&amp;logoColor=white">
+  <img alt="scikit-learn" src="https://img.shields.io/badge/scikit--learn-ML-F7931E?style=flat-square&amp;logo=scikitlearn&amp;logoColor=white">
+  <img alt="Provider-grouped cross-validation" src="https://img.shields.io/badge/Validation-Provider--grouped%20CV-475569?style=flat-square">
+  <a href="https://github.com/dalal35/Cogni-Shift/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/dalal35/Cogni-Shift/actions/workflows/ci.yml/badge.svg"></a>
+</p>
+
+| **0.865** | **44,362** | **789** | **478** | **5 folds** |
 | :---: | :---: | :---: | :---: | :---: |
-| **0.865** | **44,362** | **789** | **478** | **5 provider-grouped folds** |
+| Mean ROC-AUC | Orders analyzed | Eligible windows | Providers | Grouped by provider |
 
-CogniShift turns timestamped order logs into an explicit prediction problem: summarize orders 1–5, then classify elevated `Change` / `D/C` activity in orders 6–15. Logistic regression and random forest are evaluated on providers excluded from training. The target measures **order-modification activity**, not fatigue, errors, or clinical risk.
+Order changes are a normal part of clinical work. We wanted to know whether the pattern in a provider's first few orders carried any signal about what happened next.
 
-¹ Shifts are constructed provider-date day/night windows, not verified staffing shifts. Tied timestamps also limit any claim of prospective lead time; see [limitations](#limitations).
+CogniShift turns order logs into a classification task: use **orders 1–5** to predict elevated `Change` or `D/C` activity in **orders 6–15**. We compared logistic regression and random forest against a simple baseline, keeping providers in separate training and evaluation folds.
 
-![Logistic regression, random forest and majority baseline: mean ROC-AUC and positive-class F1, with five fold values and sample standard deviations.](docs/results/model_comparison.png)
+This is a retrospective study of **order-modification activity**, not a model of clinician fatigue, medical errors, or patient risk.
 
 ## Results
 
-| Model | ROC-AUC, mean ± SD | Positive-class F1, mean ± SD |
+![Comparison of ROC-AUC and positive-class F1 across provider-grouped folds](docs/results/model_comparison.png)
+
+| Model | ROC-AUC (mean ± SD) | Positive-class F1 (mean ± SD) |
 | --- | ---: | ---: |
-| Logistic regression | **0.865 ± 0.066** | 0.569 ± 0.111 |
+| **Logistic regression** | **0.865 ± 0.066** | 0.569 ± 0.111 |
 | Random forest | 0.862 ± 0.066 | **0.598 ± 0.090** |
-| Majority baseline | 0.500 ± 0.000 | 0.000 ± 0.000 |
+| Majority-class baseline | 0.500 ± 0.000 | 0.000 ± 0.000 |
 
-These are unweighted means over five held-out-provider folds. Error bars show sample SD across folds, **not confidence intervals**. Both models are reported; the small AUC difference does not establish superiority. The baseline returns the training class prior and predicts the negative class at 0.5 in every fold, hence zero positive-class F1.
+Results are averages across five folds with providers held out from training. The ± values show fold-to-fold standard deviation, not confidence intervals. The two models perform similarly on ROC-AUC, so the small difference isn't enough to call either one better overall.
 
-The local extract contains 45,154 rows; 792 missing-provider rows are excluded. Every training fold has a 75th-percentile modification-rate cutoff of 0.30, so high activity means **at least 4 modifications among the next 10 orders**. Held-out positive prevalence ranges from 15.2% to 20.9%. See the [per-fold evidence](docs/results/fold_metrics.csv) and [run summary](docs/results/run_summary.json). **Reproducing the original 0.865 ROC-AUC requires separately obtaining authorized MIMIC-IV data and the original extract.** Restricted clinical inputs are not distributed. The synthetic example below is a separate demonstration and does not reproduce this score.
+In each training fold, we defined “elevated” activity as a modification rate above the training set's 75th percentile. That cutoff was 0.30 in this evaluation, corresponding to **at least four modifications among the next ten orders**. The held-out positive rate ranged from 15.2% to 20.9%.
 
-## Approach and architecture
+The detailed numbers are in [fold_metrics.csv](docs/results/fold_metrics.csv) and [run_summary.json](docs/results/run_summary.json).
 
-Twelve predictors describe early modifications, order-type diversity and entropy, task switches, timing gaps and rate, medication share, cyclical start time, and weekend status. Provider identifiers and outcome-window events never enter the feature matrix.
+## How it works
+
+Each eligible provider/day-night window supplies two nonoverlapping sequences:
+
+- **First five orders:** 12 features covering early modifications, order types, task switching, timing, and time of day.
+- **Next ten orders:** the proportion marked `Change` or `D/C`, used only to define and evaluate the outcome.
+
+We split the data into five folds by provider so the same provider never appears on both sides of a fold. The modification-rate threshold and preprocessing are fitted on training data only.
 
 ```mermaid
 flowchart TD
-    A["Raw POE order CSV"] --> B["Validate schema; normalize and sort records"]
-    B --> C["Construct provider-date day/night windows; keep 15+ orders"]
-    C --> D["Orders 1–5: predictors X"]
-    C --> E["Orders 6–15: modification rate r"]
-    D --> F["Five folds grouped by provider"]
-    E --> F
-    F --> T["Training providers: X and r"]
-    F --> V["Held-out providers: X and r"]
-    T -->|training r only| Q["Learn cutoff q = 75th percentile"]
-    Q --> Y["Training labels: r greater than q"]
-    T -->|training X only| P["Fit median imputation; fit scaling for LR"]
-    P --> M["Fit logistic regression and random forest"]
-    Y --> M
-    Y --> K["Fit majority class-prior baseline"]
-    M --> S["Held-out X: fitted transforms and model scores"]
-    K --> S
-    V -->|X only| S
-    Q -->|apply unchanged| L["Held-out labels: r greater than q"]
-    V -->|r only| L
-    S --> H["Held-out ROC-AUC, F1, precision and recall"]
-    L --> H
-    H --> O["Fold metrics, local predictions, chart and run summary"]
+    A["POE order records"] --> B["Validate, sort, and build provider/day-night windows"]
+    B --> C["Windows with at least 15 orders"]
+    C --> X["Orders 1–5: 12 features"]
+    C --> R["Orders 6–15: modification rate"]
+    X --> G["Five folds grouped by provider"]
+    R --> G
+    G --> T["Training providers"]
+    G --> V["Held-out providers"]
+    T --> Q["Learn 75th-percentile outcome cutoff"]
+    T --> Y["Create training labels"]
+    Q --> Y
+    T --> P["Fit preprocessing on training features"]
+    Y --> M["Fit logistic regression, random forest, and baseline"]
+    P --> M
+    M --> S["Score held-out first-five features"]
+    V --> S
+    Q --> L["Label held-out outcomes using the training cutoff"]
+    V --> L
+    S --> E["ROC-AUC, F1, precision, recall"]
+    L --> E
+    E --> O["Metrics, predictions, and comparison chart"]
 ```
 
-Each fold learns its outcome cutoff **only from training rates** and applies the same cutoff to held-out rates. Fresh pipelines fit imputation and scaling only on training predictors. Held-out outcomes are used to score predictions, never to fit preprocessing, thresholds, or models. Records are sorted by timestamp; equal timestamps retain input row order.
+No information from orders 6–15 is included in the model's input features. Those orders are used to evaluate the prediction. This separation matters, although tied timestamps create an important limitation discussed [below](#limitations).
 
-The implementation separates responsibilities without adding a framework:
+For the feature definitions, model settings, and evaluation protocol, see [Methodology](docs/methodology.md).
 
-```text
-cognishift/
-├── __main__.py       # python -m cognishift
-├── cli.py            # arguments, execution and exports
-├── data.py           # input validation and shift assignment
-├── features.py       # first-five features and next-ten outcome
-├── evaluation.py     # models and provider-grouped cross-validation
-├── reporting.py      # aggregate comparison figure
-└── synthetic.py      # deterministic, entirely artificial orders
-tests/                # synthetic unit and CLI integration tests
-docs/
-├── methodology.md    # feature definitions, protocol and interpretation
-└── results/          # curated aggregate evidence; no provider records
-data/README.md        # input schema, provenance and access requirements
-pyproject.toml        # installation and development tooling
-requirements-lock.txt # exact verified environment
-.github/workflows/ci.yml
-```
+## Run it yourself
 
-Full feature definitions and model settings are in [the methodology](docs/methodology.md).
-
-## Reproduce
-
-Use **Python 3.14**. This is the tested version; other Python versions are not currently claimed as supported.
+The project was tested with **Python 3.14**. It includes a synthetic dataset generator, so you can run the complete pipeline without access to clinical records.
 
 ```bash
 git clone https://github.com/dalal35/Cogni-Shift.git
@@ -95,39 +91,65 @@ python -m pip install --no-deps -e .
 python -m cognishift --synthetic --output-dir outputs/demo
 ```
 
-On Windows PowerShell, create the environment with `py -3.14 -m venv .venv` and activate with `.venv\Scripts\Activate.ps1`. Windows execution has not been verified.
+On Windows PowerShell, use `py -3.14 -m venv .venv` and `.venv\Scripts\Activate.ps1` for the environment setup. Windows execution has not been tested.
 
-For a normal installation with compatible dependency versions, use `python -m pip install -e ".[dev]"` instead of the two installation commands. The lock file records the environment used to verify published results; alternate dependency versions can change floating-point outputs or splits.
+The synthetic run writes a metrics CSV, prediction CSV, comparison chart, and run summary to `outputs/demo/`. Its scores are **not** the reported 0.865 ROC-AUC, which comes from the original research extract.
+
+### Run the tests
 
 ```bash
+python -m pip install -e ".[dev]"
 python -m unittest discover -s tests -v
 ruff check .
 ruff format --check .
-python -m cognishift --help
 ```
 
-CI runs formatting, linting, tests, and a synthetic evaluation without clinical data.
+GitHub Actions runs linting, tests, and the synthetic evaluation without clinical data.
 
-To rerun the reported evaluation, obtain an **authorized copy of the original extract** and follow the [four-column input schema](data/README.md):
+### Run the research evaluation
+
+The reported results came from a MIMIC-IV-derived POE extract. The underlying data cannot be redistributed with this repository. Researchers with authorized access can place a compatible CSV locally and run:
 
 ```bash
 python -m cognishift --input /path/to/authorized/poe.csv --output-dir outputs/evaluation
 ```
 
-`python -m cognishift` defaults to `data/poe.csv` and `outputs/`. Input and output paths are configurable from any working directory after installation. The command exports `grouped_cv_metrics.csv`, `grouped_cv_predictions.csv`, `grouped_cv_scores.png`, and `run_summary.json`. A repeat run replaces those files. Predictions contain provider identifiers and remain local; generated files and restricted inputs are ignored by Git. Only reviewed aggregate evidence is curated under `docs/results/`.
+See [Data requirements](data/README.md) for the four input columns and provenance notes. Reproducing the exact published numbers requires the same extract; the extraction query and release version are not available in this repository.
 
-The optional [`decision_fatigue_dataset.csv`](data/decision_fatigue_dataset.csv) is a separate, synthetic behavioral dataset from Kaggle, verified as **CC0: Public Domain**. It is not used by the current evaluator or required for the built-in synthetic demonstration. See [source, license, and checksum verification](data/README.md#behavioral-dataset-license-verification).
+## Project layout
+
+```text
+cognishift/
+├── cli.py          # Command-line interface and output paths
+├── data.py         # Input checks and provider windows
+├── features.py     # Early-order features and later-order outcome
+├── evaluation.py   # Models and provider-grouped validation
+├── reporting.py    # Figures and summaries
+├── synthetic.py    # Reproducible example data
+└── __main__.py     # python -m cognishift
+tests/               # Unit and integration tests
+docs/
+├── methodology.md  # Feature definitions and evaluation details
+└── results/        # Aggregate metrics and comparison figure
+data/README.md       # Data schema, access, and provenance
+pyproject.toml       # Package and development configuration
+requirements-lock.txt
+.github/workflows/ci.yml
+```
+
+The main workflow runs with `python -m cognishift`. You can also use `python -m cognishift --help` for available options.
 
 ## Limitations
 
-- **Record sequence is not prospective lead time.** In 604 of 789 eligible windows (76.6%), order 5 and order 6 have the same timestamp. Stable input row order defines their boundary. Predictor and outcome records are disjoint, but the evaluation does not establish that a warning could precede the outcome in real time.
-- **Constructed shifts are an approximation.** Every eligible window in this extract contains one patient, so it does not establish a provider’s complete workload. The source is described as MIMIC-IV, whose [patient-specific date shifts](https://physionet.org/content/mimiciv/3.1/) prevent reconstructing cross-patient chronology without additional provenance. Actual staffing schedules are unavailable.
-- **Selection and generalization remain open.** Eligibility requires 15 orders, using later record availability. Providers are held out, but patients, institutions, and future time periods are not independently held out. There is no prospective or external validation, and no separate final test set after comparing models.
-- **Scores are not calibrated clinical probabilities.** Class-balanced training and a fixed 0.5 decision threshold support the reported classification experiment, not a validated risk score. Order modifications can be routine actions.
-- **Clinical data access is restricted.** MIMIC-IV inputs and provider-level outputs are excluded from this release. Researchers must obtain their own authorized access; the original extraction query and release version are not recorded, so another extract may produce different results. See [data handling](data/README.md#provenance-and-publishing).
+A strong retrospective ROC-AUC does **not** mean this is ready to make real-time clinical predictions. There are several important reasons:
 
-The project began with exploratory behavioral-to-clinical transfer and provider-relative scoring. Those unvalidated proxies are not evidence for the results above. Superseded scripts and versioned plots remain recoverable from earlier commits and the private local archive. The historical [browser prototype](outputs/doctor_fatigue_simulator.html) uses hard-coded profiles and heuristic scores; it is not connected to this evaluator, and its displayed fatigue/error probabilities are not validated results. The next useful research step is validating real chronology and extraction provenance before extending the models.
+- **Order sequence is not necessarily elapsed time.** In 604 of 789 eligible windows (76.6%), the fifth and sixth orders share a timestamp. We preserve input row order for ties, but cannot show that a prediction would have preceded the outcome in real time.
+- **These aren't confirmed staffing shifts.** We construct day/night windows from timestamps. Every eligible window in this extract contains orders for one patient, so the analysis does not represent a provider's full workload. MIMIC-IV also shifts dates at the patient level, complicating cross-patient chronology.
+- **The evaluation is limited to this extract.** We require at least 15 orders in a window, which selects cases using later availability. Holding out providers is useful, but it isn't the same as validation at another hospital or in a future time period.
+- **Modification activity is not a clinical outcome.** A changed or discontinued order can be routine. Model scores have not been calibrated or validated as measures of fatigue, medical error, or patient risk.
 
-## Contributors
+These questions about chronology and generalization are the main things we would want to address before taking the work beyond retrospective analysis.
 
-Developed by **Catalyst Crew**, including **Yash Dalal** and **Sri Dhruti Sirigibathina**. Recognition and development credit belong to the team; the repository does not establish a verified division of individual responsibilities. Award title and year are supplied by the project team.
+## Team
+
+CogniShift was developed by **Catalyst Crew**, including **Yash Dalal** and **Sri Dhruti Sirigibathina**, for the **2026 Purdue Innovation Challenge**, where the team received **Best Overall Integration**.
