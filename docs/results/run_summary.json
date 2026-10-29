@@ -1,0 +1,19 @@
+{
+  "mode": "local",
+  "input_sha256": "25ece4e141c2d3e300565fe1957fcdd7d4048a3d66e0f483027543e35f4e056d",
+  "cleaned_orders": 44362,
+  "eligible_shifts": 789,
+  "providers": 478,
+  "seed": 42,
+  "n_folds": 5,
+  "first_n": 5,
+  "next_n": 10,
+  "versions": {
+    "python": "3.14.7",
+    "numpy": "2.5.4",
+    "pandas": "3.1.0",
+    "scikit-learn": "1.9.1",
+    "scipy": "1.18.1",
+    "matplotlib": "3.11.2"
+  }
+}

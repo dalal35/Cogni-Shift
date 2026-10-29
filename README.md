@@ -1,271 +1,133 @@
-<div align="center">
+# CogniShift
 
-<br/>
+**Can a provider’s first five orders predict elevated modification activity in their next ten?**
 
-<pre>
- 
- ██████╗ ██████╗  ██████╗ ███╗   ██╗██╗███████╗██╗  ██╗██╗███████╗████████╗
-██╔════╝██╔═══██╗██╔════╝ ████╗  ██║██║██╔════╝██║  ██║██║██╔════╝╚══██╔══╝
-██║     ██║   ██║██║  ███╗██╔██╗ ██║██║███████╗███████║██║█████╗     ██║   
-██║     ██║   ██║██║   ██║██║╚██╗██║██║╚════██║██╔══██║██║██╔══╝     ██║   
-╚██████╗╚██████╔╝╚██████╔╝██║ ╚████║██║███████║██║  ██║██║██║        ██║   
- ╚═════╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═══╝╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚═╝        ╚═╝   
+**2026 Purdue Innovation Challenge — Best Overall Integration** · Built by Catalyst Crew
 
-</pre>
+| Logistic regression ROC-AUC | Analyzed orders | Eligible shifts¹ | Providers | Evaluation |
+| :---: | :---: | :---: | :---: | :---: |
+| **0.865** | **44,362** | **789** | **478** | **5 provider-grouped folds** |
 
-# Decision Fatigue Detection in Clinical Workflows
+CogniShift turns timestamped order logs into an explicit prediction problem: summarize orders 1–5, then classify elevated `Change` / `D/C` activity in orders 6–15. Logistic regression and random forest are evaluated on providers excluded from training. The target measures **order-modification activity**, not fatigue, errors, or clinical risk.
 
-**Detecting degraded physician judgment from behavioral signals alone — before the errors appear.**
+¹ Shifts are constructed provider-date day/night windows, not verified staffing shifts. Tied timestamps also limit any claim of prospective lead time; see [limitations](#limitations).
 
-<br/>
+![Logistic regression, random forest and majority baseline: mean ROC-AUC and positive-class F1, with five fold values and sample standard deviations.](docs/results/model_comparison.png)
 
-![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![scikit-learn](https://img.shields.io/badge/scikit--learn-1.3+-F7931E?style=for-the-badge&logo=scikit-learn&logoColor=white)
-![MIMIC-IV](https://img.shields.io/badge/MIMIC--IV-PhysioNet-00d4aa?style=for-the-badge)
-![License](https://img.shields.io/badge/License-MIT-ff6b6b?style=for-the-badge)
+## Results
 
-<br/>
+| Model | ROC-AUC, mean ± SD | Positive-class F1, mean ± SD |
+| --- | ---: | ---: |
+| Logistic regression | **0.865 ± 0.066** | 0.569 ± 0.111 |
+| Random forest | 0.862 ± 0.066 | **0.598 ± 0.090** |
+| Majority baseline | 0.500 ± 0.000 | 0.000 ± 0.000 |
 
-*Built for the ISB Integrated Science & Business Challenge — Purdue University, April 2025*
+These are unweighted means over five held-out-provider folds. Error bars show sample SD across folds, **not confidence intervals**. Both models are reported; the small AUC difference does not establish superiority. The baseline returns the training class prior and predicts the negative class at 0.5 in every fold, hence zero positive-class F1.
 
-<br/>
+The local extract contains 45,154 rows; 792 missing-provider rows are excluded. Every training fold has a 75th-percentile modification-rate cutoff of 0.30, so high activity means **at least 4 modifications among the next 10 orders**. Held-out positive prevalence ranges from 15.2% to 20.9%. See the [per-fold evidence](docs/results/fold_metrics.csv) and [run summary](docs/results/run_summary.json). **Reproducing the original 0.865 ROC-AUC requires separately obtaining authorized MIMIC-IV data and the original extract.** Restricted clinical inputs are not distributed. The synthetic example below is a separate demonstration and does not reproduce this score.
 
-</div>
+## Approach and architecture
 
----
+Twelve predictors describe early modifications, order-type diversity and entropy, task switches, timing gaps and rate, medication share, cyclical start time, and weekend status. Provider identifiers and outcome-window events never enter the feature matrix.
 
-## The Problem
-
-> **Judges grant parole 65% of the time at the start of a session. By the end, the rate approaches zero.**
-> *(Danziger et al., PNAS 2011)*
-
-Decision fatigue is real, statistically measurable, and invisible to the people experiencing it. In high-stakes professional environments — clinical medicine, aviation, legal adjudication — degraded judgment doesn't announce itself. It just quietly increases the probability of a mistake.
-
-The standard response is to wait for errors and respond to them. We flip that entirely.
-
-**We don't measure fatigue. We measure the behavioral shadow fatigue casts on decisions — and the shadow appears before the errors do.**
-
----
-
-## What This Does
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                                                                 │
-│   KAGGLE BEHAVIORAL DATASET          MIMIC-IV CLINICAL DATA     │
-│   ─────────────────────────          ────────────────────────   │
-│   Hours_Awake          ──────────►  Time since shift start      │
-│   Decisions_Made       ──────────►  Orders placed this shift    │
-│   Avg_Decision_Time    ──────────►  Inter-order timestamp gaps  │
-│   Error_Rate           ──────────►  Order amendment rate        │
-│   Cognitive_Load_Score ──────────►  Order type entropy          │
-│   Task_Switches        ──────────►  Order type transitions      │
-│                                                                 │
-│        ▼ Train fatigue classifier        ▼ Apply to real data   │
-│                                                                 │
-│   ┌──────────────────────────────────────────────────────────┐  │
-│   │  Calibrated GBM  →  Fatigue Probability per Shift Window │  │
-│   │                                                          │  │
-│   │  🟢 Low (0.00–0.33)   🟡 Moderate (0.33–0.67)           │  │
-│   │  🔴 High (0.67–1.00)  →  Break Recommendation Triggered  │  │
-│   └──────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A["Raw POE order CSV"] --> B["Validate schema; normalize and sort records"]
+    B --> C["Construct provider-date day/night windows; keep 15+ orders"]
+    C --> D["Orders 1–5: predictors X"]
+    C --> E["Orders 6–15: modification rate r"]
+    D --> F["Five folds grouped by provider"]
+    E --> F
+    F --> T["Training providers: X and r"]
+    F --> V["Held-out providers: X and r"]
+    T -->|training r only| Q["Learn cutoff q = 75th percentile"]
+    Q --> Y["Training labels: r greater than q"]
+    T -->|training X only| P["Fit median imputation; fit scaling for LR"]
+    P --> M["Fit logistic regression and random forest"]
+    Y --> M
+    Y --> K["Fit majority class-prior baseline"]
+    M --> S["Held-out X: fitted transforms and model scores"]
+    K --> S
+    V -->|X only| S
+    Q -->|apply unchanged| L["Held-out labels: r greater than q"]
+    V -->|r only| L
+    S --> H["Held-out ROC-AUC, F1, precision and recall"]
+    L --> H
+    H --> O["Fold metrics, local predictions, chart and run summary"]
 ```
 
-The pipeline trains on labeled behavioral fatigue data from Kaggle, engineers equivalent features from real MIMIC-IV physician order sequences, and produces a per-shift fatigue risk score for every provider — without any self-reporting.
+Each fold learns its outcome cutoff **only from training rates** and applies the same cutoff to held-out rates. Fresh pipelines fit imputation and scaling only on training predictors. Held-out outcomes are used to score predictions, never to fit preprocessing, thresholds, or models. Records are sorted by timestamp; equal timestamps retain input row order.
 
----
+The implementation separates responsibilities without adding a framework:
 
-## Key Findings
-
-| Signal | Finding |
-|---|---|
-| **Hour of Day** | Fatigue probability follows a circadian curve — peaks in early morning hours (0–6h) and mid-evening (18–21h) |
-| **Error Rate vs Decisions** | High-risk providers show disproportionate error clustering at moderate decision volumes — not just high volumes |
-| **Shift Duration** | Fatigue probability follows a U-shaped polynomial across shift hours — high at onset, dipping mid-shift, rising sharply after hour 9 |
-| **Top Predictors** | `Hours_Awake` and `Decisions_Made` dominate Kaggle RF importances; `Error_Rate_per_hour` is the strongest MIMIC signal |
-
----
-
-## Architecture
-
-```
-main.py
-│
-├── [Step 1]  load_kaggle_data()
-│             prepare_kaggle_features()       ← circadian sin/cos encoding
-│             train_kaggle_model()            ← RF + LR, AUC reported
-│
-├── [Step 2]  load_poe()                      ← MIMIC-IV physician orders
-│             load_emar()                     ← medication administration records
-│             assign_shifts()                 ← 12-hr windows (07:00/19:00 anchored)
-│             compute_error_signals()         ← D/C + Change + EMAR not-given
-│             engineer_mimic_features()       ← per-shift behavioral features
-│
-├── [Step 3]  build_within_mimic_model()      ← Kaggle-weighted composite score
-│                                                within-provider top-quartile labels
-│                                                Calibrated GBM (isotonic, cv=3)
-│                                                rank-based uniform probability transform
-│
-└── [Step 4]  plot_results()                  ← 3-panel diagnostic figure
-              save_outputs()                  ← CSV + PNG
+```text
+cognishift/
+├── __main__.py       # python -m cognishift
+├── cli.py            # arguments, execution and exports
+├── data.py           # input validation and shift assignment
+├── features.py       # first-five features and next-ten outcome
+├── evaluation.py     # models and provider-grouped cross-validation
+├── reporting.py      # aggregate comparison figure
+└── synthetic.py      # deterministic, entirely artificial orders
+tests/                # synthetic unit and CLI integration tests
+docs/
+├── methodology.md    # feature definitions, protocol and interpretation
+└── results/          # curated aggregate evidence; no provider records
+data/README.md        # input schema, provenance and access requirements
+pyproject.toml        # installation and development tooling
+requirements-lock.txt # exact verified environment
+.github/workflows/ci.yml
 ```
 
-### Feature Engineering from MIMIC-IV POE
+Full feature definitions and model settings are in [the methodology](docs/methodology.md).
 
-| MIMIC Feature | Source | Kaggle Analog |
-|---|---|---|
-| `Hours_Awake` | `max(ordertime) - min(ordertime)` per shift | `Hours_Awake` |
-| `Decisions_per_hour` | `n_orders / shift_duration` (capped at 60) | `Decisions_Made` |
-| `Task_Switches_per_hour` | `order_type` transitions / shift_duration | `Task_Switches` |
-| `Avg_Decision_Time_sec` | Median inter-order timestamp gap | `Avg_Decision_Time_sec` |
-| `Error_Rate_per_hour` | `(D/C + Change + EMAR not-given) / shift_duration` | `Error_Rate` |
-| `Cognitive_Load_Score` | Normalized Shannon entropy of order type mix | `Cognitive_Load_Score` |
-| `Time_of_Day_sin/cos` | Circadian encoding of shift start hour | `Time_of_Day` |
+## Reproduce
 
-### Why Circadian Encoding?
-
-Raw hour-of-day is a discontinuous integer — hour 23 and hour 0 are adjacent in time but numerically far apart. Sine/cosine encoding wraps the 24-hour cycle into a continuous circular representation that any linear model can reason about correctly.
-
----
-
-## Data
-
-### Training Data
-**[Human Decision Fatigue Behavioral Dataset](https://www.kaggle.com/datasets/sonalshinde123/human-decision-fatigue-behavioral-dataset)**
-— Kaggle. Labeled behavioral fatigue signals with ground truth `Fatigue_Level`.
-
-### Application Data
-**[MIMIC-IV](https://physionet.org/content/mimiciv/)**
-— PhysioNet / MIT Laboratory for Computational Physiology. Free access with credentialing (complete the CITI training course at physionet.org — approximately 2 hours).
-
-Files used:
-
-```
-data/
-  decision_fatigue_dataset.csv    ← Kaggle training data
-  poe.csv                         ← MIMIC-IV: physician order entry
-  emar.csv                        ← MIMIC-IV: medication administration record
-```
-
----
-
-## Quickstart
+Use **Python 3.14**. This is the tested version; other Python versions are not currently claimed as supported.
 
 ```bash
-# 1. Clone
-git clone https://github.com/your-org/catalyst-crew.git
-cd catalyst-crew
-
-# 2. Install dependencies
-python3 -m venv venv
-source venv/bin/activate
-pip install pandas numpy scikit-learn scipy matplotlib
-
-# 3. Place data files in data/
-#    (see Data section above for sources)
-
-# 4. Run
-python3 main.py
+git clone https://github.com/dalal35/Cogni-Shift.git
+cd Cogni-Shift
+python3.14 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-lock.txt
+python -m pip install --no-deps -e .
+python -m cognishift --synthetic --output-dir outputs/demo
 ```
 
-### Outputs
+On Windows PowerShell, create the environment with `py -3.14 -m venv .venv` and activate with `.venv\Scripts\Activate.ps1`. Windows execution has not been verified.
 
+For a normal installation with compatible dependency versions, use `python -m pip install -e ".[dev]"` instead of the two installation commands. The lock file records the environment used to verify published results; alternate dependency versions can change floating-point outputs or splits.
+
+```bash
+python -m unittest discover -s tests -v
+ruff check .
+ruff format --check .
+python -m cognishift --help
 ```
-outputs/
-  fatigue_analysis_v7.png          ← 3-panel diagnostic figure
-  provider_fatigue_scores_v7.csv   ← per-shift fatigue scores for every provider
+
+CI runs formatting, linting, tests, and a synthetic evaluation without clinical data.
+
+To rerun the reported evaluation, obtain an **authorized copy of the original extract** and follow the [four-column input schema](data/README.md):
+
+```bash
+python -m cognishift --input /path/to/authorized/poe.csv --output-dir outputs/evaluation
 ```
 
----
+`python -m cognishift` defaults to `data/poe.csv` and `outputs/`. Input and output paths are configurable from any working directory after installation. The command exports `grouped_cv_metrics.csv`, `grouped_cv_predictions.csv`, `grouped_cv_scores.png`, and `run_summary.json`. A repeat run replaces those files. Predictions contain provider identifiers and remain local; generated files and restricted inputs are ignored by Git. Only reviewed aggregate evidence is curated under `docs/results/`.
 
-## Model Details
+The optional [`decision_fatigue_dataset.csv`](data/decision_fatigue_dataset.csv) is a separate, synthetic behavioral dataset from Kaggle, verified as **CC0: Public Domain**. It is not used by the current evaluator or required for the built-in synthetic demonstration. See [source, license, and checksum verification](data/README.md#behavioral-dataset-license-verification).
 
-### Stage 1 — Kaggle RF Classifier
-Trained on labeled behavioral data. Used primarily to extract **feature importances**, which seed the composite score weights applied in Stage 2.
+## Limitations
 
-- Algorithm: `RandomForestClassifier` (200 trees, max_depth=6, balanced class weight)
-- Validation: AUC on 20% holdout + 5-fold CV
-- Features: 8 behavioral signals (circadian-encoded)
+- **Record sequence is not prospective lead time.** In 604 of 789 eligible windows (76.6%), order 5 and order 6 have the same timestamp. Stable input row order defines their boundary. Predictor and outcome records are disjoint, but the evaluation does not establish that a warning could precede the outcome in real time.
+- **Constructed shifts are an approximation.** Every eligible window in this extract contains one patient, so it does not establish a provider’s complete workload. The source is described as MIMIC-IV, whose [patient-specific date shifts](https://physionet.org/content/mimiciv/3.1/) prevent reconstructing cross-patient chronology without additional provenance. Actual staffing schedules are unavailable.
+- **Selection and generalization remain open.** Eligibility requires 15 orders, using later record availability. Providers are held out, but patients, institutions, and future time periods are not independently held out. There is no prospective or external validation, and no separate final test set after comparing models.
+- **Scores are not calibrated clinical probabilities.** Class-balanced training and a fixed 0.5 decision threshold support the reported classification experiment, not a validated risk score. Order modifications can be routine actions.
+- **Clinical data access is restricted.** MIMIC-IV inputs and provider-level outputs are excluded from this release. Researchers must obtain their own authorized access; the original extraction query and release version are not recorded, so another extract may produce different results. See [data handling](data/README.md#provenance-and-publishing).
 
-### Stage 2 — Within-MIMIC Calibrated GBM
-Because MIMIC has no ground-truth fatigue labels, we generate pseudo-labels within each provider using their own shift distribution (top quartile = fatigued). This controls for between-provider baseline differences — a fast physician who slows down is more fatigued than a naturally slow one at the same speed.
+The project began with exploratory behavioral-to-clinical transfer and provider-relative scoring. Those unvalidated proxies are not evidence for the results above. Superseded scripts and versioned plots remain recoverable from earlier commits and the private local archive. The historical [browser prototype](outputs/doctor_fatigue_simulator.html) uses hard-coded profiles and heuristic scores; it is not connected to this evaluator, and its displayed fatigue/error probabilities are not validated results. The next useful research step is validating real chronology and extraction provenance before extending the models.
 
-- Algorithm: `GradientBoostingClassifier` wrapped in `CalibratedClassifierCV` (isotonic, cv=3)
-- Labeling: within-provider top-quartile composite score
-- Output transform: rank-based uniform with jitter (guarantees calibrated probability spread)
-- Risk tiers: equal thirds — Low [0, 0.33), Moderate [0.33, 0.67), High [0.67, 1.0]
+## Contributors
 
-### Why Personal Baseline Matters
-
-Aggregate models that compare all physicians to a population mean conflate two entirely different things:
-- **Inter-provider variance** — some physicians are naturally faster or slower
-- **Intra-provider fatigue signal** — the same physician degrading over a shift
-
-We model only the second. This is the same methodological insight behind the Israeli parole study — the *change within* a session, not the *level across* sessions, is the fatigue signal.
-
----
-
-## Diagnostic Charts
-
-### Chart 1 — Fatigue Probability by Hour of Day
-Mean fatigue probability (±1 SEM) across all shift windows, grouped by shift start hour. Night-shift windows shaded. **Metric: Spearman ρ** between hour of day and fatigue probability.
-
-### Chart 2 — Error Rate/hr vs Decisions/hr by Risk Tier
-Scatter plot coloured by risk tier with LOWESS trend lines per tier. Shows that high-risk providers have disproportionately elevated error rates across the full decision volume range — not just at extremes. **Metric: Pearson r** between decisions/hr and error rate/hr.
-
-### Chart 3 — Fatigue Probability vs Shift Duration
-Binned mean fatigue probability across shift hours 1–12, with 95% CI ribbon and degree-2 polynomial fit. Captures the characteristic U-shape: elevated at shift onset, dipping mid-shift, rising sharply in the final hours. **Metric: Polynomial fit R².**
-
----
-
-## The Business Case
-
-> One missed tumor that leads to a lawsuit costs a radiology group $2–4M.
-> A wrongful parole decision costs a jurisdiction far more.
-> This tool priced at $50K/year per facility looks like insurance, not software.
-
-**The product is not a wellness tool. It is a liability reduction instrument.**
-
-The model does one thing: sends a **break recommendation** to a supervisor when a provider's fatigue score crosses a threshold. It does not override clinical decisions. It does not surveil employees. It gives the institution a defensible, data-grounded intervention trigger that replaces "we had no way of knowing."
-
-**Target markets:**
-- Hospital systems (ICU physician scheduling)
-- Radiology groups (reading session management)
-- Air traffic control facilities (FAA duty period compliance)
-- Legal operations (document review session limits)
-
----
-
-## Team
-
-Built by **Catalyst Crew** for the ISB Integrated Science & Business Challenge, Purdue University.
-
-| | Role |
-|---|---|
-| **Yash Dalal** | Data Science & Statistics — statistical modeling, feature engineering, MIMIC pipeline |
-| **Sri Dhruti Sirigibathina** | Integrated Business & Engineering — agentic systems, supply chain application, business model |
-
----
-
-## References
-
-- Danziger, S., Levav, J., & Avnaim-Pesso, L. (2011). *Extraneous factors in judicial decisions.* PNAS.
-- Johnson, A.E.W. et al. (2023). *MIMIC-IV, a freely accessible electronic health record dataset.* Scientific Data.
-- Drew, T., Vo, M.L.H., & Wolfe, J.M. (2013). *The invisible gorilla strikes again.* Psychological Science.
-
----
-
-<div align="center">
-
-<br/>
-
-*"We don't measure fatigue. We measure the behavioral shadow fatigue casts on decisions — and the shadow appears before the errors do."*
-
-<br/>
-
-![Made with Python](https://img.shields.io/badge/Made%20with-Python-3776AB?style=flat-square&logo=python&logoColor=white)
-![MIMIC-IV](https://img.shields.io/badge/Data-MIMIC--IV-00d4aa?style=flat-square)
-![Purdue](https://img.shields.io/badge/Purdue-ISB%20Challenge%202025-CEB888?style=flat-square)
-
-</div>
+Developed by **Catalyst Crew**, including **Yash Dalal** and **Sri Dhruti Sirigibathina**. Recognition and development credit belong to the team; the repository does not establish a verified division of individual responsibilities. Award title and year are supplied by the project team.

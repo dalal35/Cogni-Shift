@@ -1,0 +1,2 @@
+# Preserve the verified Kaggle download checksum on every platform.
+data/decision_fatigue_dataset.csv -text whitespace=cr-at-eol
