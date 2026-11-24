@@ -3,7 +3,7 @@
 <p align="center"><strong>Can the first five orders help predict how often the next ten will be changed?</strong></p>
 
 <p align="center">
-  <strong>Best Overall Integration</strong> · 2026 Purdue Innovation Challenge · Catalyst Crew
+  <strong>Best Integration of Science and Business</strong> · 2026 Purdue ISB Challenge · Catalyst Crew
 </p>
 
 <p align="center">
@@ -152,4 +152,4 @@ These questions about chronology and generalization are the main things we would
 
 ## Team
 
-CogniShift was developed by **Catalyst Crew**, including **Yash Dalal** and **Sri Dhruti Sirigibathina**, for the **2026 Purdue Innovation Challenge**, where the team received **Best Overall Integration**.
+CogniShift was developed by **Catalyst Crew**, including **Yash Dalal** and **Sri Dhruti Sirigibathina**, for the **2026 Purdue ISB Challenge**, where the team received **Best Integration of Science and Business**.
